@@ -60,7 +60,9 @@ async function main() {
     if (polling) return;
     polling = true;
     try {
+      console.log("📫 Polling for new emails...");
       const newEmails = await pollForNewEmails(config.email);
+      console.log(`   Found ${newEmails.length} unread email(s)`);
       for (const email of newEmails) {
         await triggerLoop1(email, config);
       }
