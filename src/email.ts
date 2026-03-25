@@ -39,10 +39,11 @@ export async function pollForNewEmails(config: EmailConfig): Promise<ParsedEmail
   });
 
   try {
-    console.log("  IMAP: connecting to", config.imap.host, "compression:", !(imap as any).options?.disableCompression);
+    console.log("  IMAP: connecting to", config.imap.host);
     await imap.connect();
-    console.log("  IMAP: connected");
+    console.log("  IMAP: connected, locking mailbox...");
     const lock = await imap.getMailboxLock("INBOX");
+    console.log("  IMAP: mailbox locked, fetching unseen...");
 
     try {
       for await (const msg of imap.fetch({ seen: false }, { source: true })) {
