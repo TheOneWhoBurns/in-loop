@@ -6,9 +6,12 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import cron from "node-cron";
 import { loadConfig, isFirstRun, type InloopConfig } from "./config.js";
-import { initDB, type DB } from "./db.js";
 import { pollForNewEmails } from "./email.js";
-import { ClickTracker } from "./tracker.js";
+// Lazy-import db.js — better-sqlite3's native addon conflicts with ImapFlow
+// when both are loaded via tsx's ESM transform at module init time
+let initDB: typeof import("./db.js").initDB;
+let ClickTracker: typeof import("./tracker.js").ClickTracker;
+type DB = import("./db.js").DB;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, "..");
@@ -44,6 +47,12 @@ async function main() {
     console.error("  tsx install/wizard.ts");
     process.exit(1);
   }
+
+  // Dynamic imports to avoid tsx ESM + better-sqlite3 native addon conflict
+  const dbMod = await import("./db.js");
+  initDB = dbMod.initDB;
+  const trackerMod = await import("./tracker.js");
+  ClickTracker = trackerMod.ClickTracker;
 
   const config = await loadConfig();
   const db = initDB(config.dataDir);
