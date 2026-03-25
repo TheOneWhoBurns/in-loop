@@ -27,6 +27,8 @@ export async function pollForNewEmails(config: EmailConfig): Promise<ParsedEmail
     secure: config.imap.secure,
     auth: config.imap.auth,
     logger: false,
+    // Disable DEFLATE compression — conflicts with tsx's ESM transform
+    disableCompression: true,
   });
 
   const emails: ParsedEmail[] = [];
