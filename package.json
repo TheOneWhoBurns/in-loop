@@ -1,25 +1,24 @@
 {
   "name": "inloop",
   "version": "0.1.0",
-  "description": "BYOK LLM-powered personal newsletter agent. Email is the UI.",
+  "description": "BYOK LLM-powered personal newsletter agent. Runs on top of Claude Code. Email is the UI.",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/daemon.js",
   "bin": {
-    "inloop": "dist/index.js"
+    "inloop": "dist/daemon.js"
   },
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "tsx src/daemon.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "setup": "tsx src/setup/wizard.ts"
+    "start": "node dist/daemon.js",
+    "install-wizard": "tsx install/wizard.ts"
   },
-  "keywords": ["newsletter", "agent", "llm", "byok", "email", "ai"],
+  "keywords": ["newsletter", "agent", "llm", "byok", "email", "ai", "claude-code"],
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "byok-llm": "^1.0.0",
     "imapflow": "^1.0.0",
     "nodemailer": "^6.9.0",
     "better-sqlite3": "^11.0.0",

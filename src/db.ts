@@ -1,13 +1,31 @@
-import type Database from "better-sqlite3";
+/**
+ * SQLite database — single file, used by both the daemon and tool scripts.
+ */
 
-export function createTables(db: Database.Database): void {
+import BetterSqlite3 from "better-sqlite3";
+import { join } from "path";
+
+export type DB = BetterSqlite3.Database;
+
+export function initDB(dataDir: string): DB {
+  const dbPath = join(dataDir, "inloop.sqlite");
+  const db = new BetterSqlite3(dbPath);
+
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+
+  createTables(db);
+  return db;
+}
+
+function createTables(db: DB): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS topics (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE,
-      preferences TEXT DEFAULT '{}',    -- JSON: per-topic user preferences
-      example_sources TEXT DEFAULT '[]', -- JSON: user-provided example sources
-      source_criteria TEXT DEFAULT '',   -- Agent-written criteria for what makes a good source
+      preferences TEXT DEFAULT '{}',
+      example_sources TEXT DEFAULT '[]',
+      source_criteria TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -17,9 +35,9 @@ export function createTables(db: Database.Database): void {
       topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
       url TEXT NOT NULL,
       name TEXT DEFAULT '',
-      rating REAL DEFAULT 0.5,          -- 0.0 to 1.0, agent-assigned
-      discovered_by TEXT DEFAULT 'agent', -- 'user' or 'agent'
-      notes TEXT DEFAULT '',             -- Agent notes about this source
+      rating REAL DEFAULT 0.5,
+      discovered_by TEXT DEFAULT 'agent',
+      notes TEXT DEFAULT '',
       last_checked_at TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
@@ -42,13 +60,13 @@ export function createTables(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS newsletters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sent_at TEXT DEFAULT (datetime('now')),
-      topics_included TEXT DEFAULT '[]', -- JSON array of topic ids
+      topics_included TEXT DEFAULT '[]',
       full_html TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS think_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      loop_type TEXT NOT NULL,           -- 'daily', 'weekly', 'email'
+      loop_type TEXT NOT NULL,
       topic_id INTEGER REFERENCES topics(id),
       content TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
@@ -57,16 +75,24 @@ export function createTables(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS influence_notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
-      week_start TEXT NOT NULL,          -- ISO date of week start
+      week_start TEXT NOT NULL,
       content TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
-    -- Indexes for common queries
+    CREATE TABLE IF NOT EXISTS rlm_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      topic_id INTEGER,
+      content TEXT NOT NULL,
+      metadata TEXT DEFAULT '{}',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_candidates_topic_date ON candidates(topic_id, found_date);
-    CREATE INDEX IF NOT EXISTS idx_candidates_included ON candidates(included_in_newsletter);
     CREATE INDEX IF NOT EXISTS idx_think_logs_loop ON think_logs(loop_type, created_at);
     CREATE INDEX IF NOT EXISTS idx_sources_topic ON sources(topic_id);
-    CREATE INDEX IF NOT EXISTS idx_influence_notes_topic_week ON influence_notes(topic_id, week_start);
+    CREATE INDEX IF NOT EXISTS idx_rlm_type ON rlm_entries(type);
+    CREATE INDEX IF NOT EXISTS idx_rlm_topic ON rlm_entries(topic_id);
   `);
 }
