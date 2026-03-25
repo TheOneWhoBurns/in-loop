@@ -1,0 +1,36 @@
+{
+  "name": "inloop",
+  "version": "0.1.0",
+  "description": "BYOK LLM-powered personal newsletter agent. Email is the UI.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "inloop": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "setup": "tsx src/setup/wizard.ts"
+  },
+  "keywords": ["newsletter", "agent", "llm", "byok", "email", "ai"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "byok-llm": "^1.0.0",
+    "imapflow": "^1.0.0",
+    "nodemailer": "^6.9.0",
+    "better-sqlite3": "^11.0.0",
+    "node-cron": "^3.0.0",
+    "mailparser": "^3.7.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^22.0.0",
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/nodemailer": "^6.4.0"
+  }
+}

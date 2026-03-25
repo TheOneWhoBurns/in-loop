@@ -1,0 +1,28 @@
+node_modules/
+dist/
+*.js.map
+*.d.ts.map
+
+# Data
+*.sqlite
+*.sqlite3
+data/
+
+# Config with secrets
+.env
+.byokrc.json
+config.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
