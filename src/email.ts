@@ -39,14 +39,16 @@ export async function pollForNewEmails(config: EmailConfig): Promise<ParsedEmail
   });
 
   try {
-    console.log("  IMAP: connecting to", config.imap.host);
     await imap.connect();
-    console.log("  IMAP: connected, locking mailbox...");
     const lock = await imap.getMailboxLock("INBOX");
-    console.log("  IMAP: mailbox locked, fetching unseen...");
 
     try {
-      for await (const msg of imap.fetch({ seen: false }, { source: true })) {
+      // Manually iterate with .next() to avoid Node.js ESM async
+      // iterator bug where for-await hangs across module boundaries
+      const iter = imap.fetch({ seen: false }, { source: true });
+      while (true) {
+        const { value: msg, done } = await iter.next();
+        if (done || !msg) break;
         const parsed = await simpleParser(msg.source);
         emails.push({
           from: parsed.from?.value?.[0]?.address || "unknown",
