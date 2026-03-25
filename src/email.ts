@@ -27,8 +27,6 @@ export async function pollForNewEmails(config: EmailConfig): Promise<ParsedEmail
     secure: config.imap.secure,
     auth: config.imap.auth,
     logger: false,
-    greetingTimeout: 30000,
-    socketTimeout: 30000,
   });
 
   const emails: ParsedEmail[] = [];
