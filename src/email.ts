@@ -39,7 +39,9 @@ export async function pollForNewEmails(config: EmailConfig): Promise<ParsedEmail
   });
 
   try {
+    console.log("  IMAP: connecting to", config.imap.host, "compression:", !(imap as any).options?.disableCompression);
     await imap.connect();
+    console.log("  IMAP: connected");
     const lock = await imap.getMailboxLock("INBOX");
 
     try {
