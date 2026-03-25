@@ -33,6 +33,11 @@ export async function pollForNewEmails(config: EmailConfig): Promise<ParsedEmail
 
   const emails: ParsedEmail[] = [];
 
+  // Prevent unhandled 'error' events from crashing the process
+  imap.on("error", (err: Error) => {
+    console.error("IMAP connection error:", err.message);
+  });
+
   try {
     await imap.connect();
     const lock = await imap.getMailboxLock("INBOX");
@@ -54,7 +59,7 @@ export async function pollForNewEmails(config: EmailConfig): Promise<ParsedEmail
       lock.release();
     }
   } finally {
-    await imap.logout();
+    await imap.logout().catch(() => {});
   }
 
   return emails;
