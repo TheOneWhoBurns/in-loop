@@ -1,15 +1,7 @@
 #!/usr/bin/env node
 
-/**
- * inloop daemon — persistent process that:
- * 1. Polls IMAP for new emails → invokes agent CLI (Loop 1)
- * 2. Runs daily research cron → invokes agent CLI per topic (Loop 2)
- * 3. Runs weekly newsletter cron → invokes agent CLI (Loop 3)
- * 4. Optionally runs click tracking server
- */
-
-import { execSync } from "child_process";
-import { readFileSync } from "fs";
+import { execFile } from "child_process";
+import { readFile } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import cron from "node-cron";
@@ -20,6 +12,22 @@ import { ClickTracker } from "./tracker.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, "..");
+
+const ALLOWED_TOOLS = "Bash(tsx:*)";
+const MAX_CONCURRENT_TOPICS = 3;
+
+// Prompt templates — loaded once at startup
+let promptLoop1 = "";
+let promptLoop2 = "";
+let promptLoop3 = "";
+
+async function loadPrompts(): Promise<void> {
+  [promptLoop1, promptLoop2, promptLoop3] = await Promise.all([
+    readFile(join(PROJECT_ROOT, "prompts/loop1-email.md"), "utf-8"),
+    readFile(join(PROJECT_ROOT, "prompts/loop2-daily.md"), "utf-8"),
+    readFile(join(PROJECT_ROOT, "prompts/loop3-weekly.md"), "utf-8"),
+  ]);
+}
 
 async function main() {
   console.log("🔄 inloop — starting up...");
@@ -33,14 +41,13 @@ async function main() {
 
   const config = await loadConfig();
   const db = initDB(config.dataDir);
+  await loadPrompts();
 
-  // Start click tracker if configured
   if (config.tracking?.enabled) {
     const tracker = new ClickTracker(config.tracking, db);
     await tracker.start();
   }
 
-  // Poll for new emails → trigger Loop 1
   let polling = false;
   const emailPoll = async () => {
     if (polling) return;
@@ -48,7 +55,7 @@ async function main() {
     try {
       const newEmails = await pollForNewEmails(config.email);
       for (const email of newEmails) {
-        await triggerLoop1(email, config, db);
+        await triggerLoop1(email, config);
       }
     } catch (err) {
       console.error("Email poll error:", err);
@@ -58,18 +65,16 @@ async function main() {
   };
 
   setInterval(emailPoll, (config.pollInterval || 30) * 1000);
-  await emailPoll(); // Initial poll
+  await emailPoll();
 
-  // Daily research cron → trigger Loop 2
   cron.schedule(config.schedule.dailyResearch, async () => {
     console.log("⏰ Daily research triggered");
     await triggerLoop2(config, db);
   });
 
-  // Weekly newsletter cron → trigger Loop 3
   cron.schedule(config.schedule.weeklyNewsletter, async () => {
     console.log("⏰ Weekly newsletter triggered");
-    await triggerLoop3(config, db);
+    await triggerLoop3(config);
   });
 
   console.log("✅ inloop is running. Waiting for emails...");
@@ -78,52 +83,50 @@ async function main() {
 
   process.on("SIGINT", () => {
     console.log("\n🛑 Shutting down...");
+    db.close();
     process.exit(0);
   });
 }
 
-/**
- * Loop 1: Handle incoming email.
- * Invokes agent CLI with the email content injected into the prompt.
- */
+function runAgent(prompt: string, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      "claude",
+      ["-p", prompt, "--allowedTools", ALLOWED_TOOLS],
+      { cwd: PROJECT_ROOT, timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 },
+      (err) => {
+        if (err) reject(err);
+        else resolve();
+      },
+    );
+    child.stdout?.pipe(process.stdout);
+    child.stderr?.pipe(process.stderr);
+  });
+}
+
 async function triggerLoop1(
   email: { from: string; subject: string; text: string; date: string },
   config: InloopConfig,
-  db: DB,
 ): Promise<void> {
   console.log(`📧 Processing email from ${email.from}: ${email.subject}`);
 
-  const promptTemplate = readFileSync(
-    join(PROJECT_ROOT, "prompts/loop1-email.md"),
-    "utf-8",
-  );
-
-  // Inject email content into prompt
-  const prompt = promptTemplate
+  const prompt = promptLoop1
     .replace("{EMAIL_FROM}", email.from)
     .replace("{EMAIL_SUBJECT}", email.subject)
     .replace("{EMAIL_BODY}", email.text)
     .replace("{EMAIL_DATE}", email.date)
-    .replace("{DATA_DIR}", config.dataDir);
+    .replaceAll("{DATA_DIR}", config.dataDir);
 
   try {
-    execSync(`claude -p ${shellEscape(prompt)} --allowedTools "Bash(tsx:*)"`, {
-      cwd: PROJECT_ROOT,
-      stdio: "inherit",
-      timeout: 120_000,
-    });
+    await runAgent(prompt, 120_000);
   } catch (err) {
     console.error("Loop 1 agent error:", err);
   }
 }
 
-/**
- * Loop 2: Daily research per topic.
- * Invokes agent CLI once per topic with context injected.
- */
 async function triggerLoop2(config: InloopConfig, db: DB): Promise<void> {
   const topics = db
-    .prepare("SELECT * FROM topics")
+    .prepare("SELECT id, name FROM topics")
     .all() as Array<{ id: number; name: string }>;
 
   if (topics.length === 0) {
@@ -131,58 +134,41 @@ async function triggerLoop2(config: InloopConfig, db: DB): Promise<void> {
     return;
   }
 
-  const promptTemplate = readFileSync(
-    join(PROJECT_ROOT, "prompts/loop2-daily.md"),
-    "utf-8",
-  );
+  // Run topics in parallel with bounded concurrency
+  const chunks: Array<typeof topics> = [];
+  for (let i = 0; i < topics.length; i += MAX_CONCURRENT_TOPICS) {
+    chunks.push(topics.slice(i, i + MAX_CONCURRENT_TOPICS));
+  }
 
-  for (const topic of topics) {
-    console.log(`🔍 Researching: ${topic.name}`);
+  for (const chunk of chunks) {
+    await Promise.all(
+      chunk.map(async (topic) => {
+        console.log(`🔍 Researching: ${topic.name}`);
+        const prompt = promptLoop2
+          .replaceAll("{TOPIC_ID}", String(topic.id))
+          .replaceAll("{TOPIC_NAME}", topic.name)
+          .replaceAll("{DATA_DIR}", config.dataDir);
 
-    const prompt = promptTemplate
-      .replace("{TOPIC_ID}", String(topic.id))
-      .replace("{TOPIC_NAME}", topic.name)
-      .replace("{DATA_DIR}", config.dataDir);
-
-    try {
-      execSync(`claude -p ${shellEscape(prompt)} --allowedTools "Bash(tsx:*)"`, {
-        cwd: PROJECT_ROOT,
-        stdio: "inherit",
-        timeout: 300_000, // 5 min per topic
-      });
-    } catch (err) {
-      console.error(`Loop 2 error for "${topic.name}":`, err);
-    }
+        try {
+          await runAgent(prompt, 300_000);
+        } catch (err) {
+          console.error(`Loop 2 error for "${topic.name}":`, err);
+        }
+      }),
+    );
   }
 }
 
-/**
- * Loop 3: Weekly newsletter curation.
- * Invokes agent CLI with all topics' data.
- */
-async function triggerLoop3(config: InloopConfig, db: DB): Promise<void> {
-  const promptTemplate = readFileSync(
-    join(PROJECT_ROOT, "prompts/loop3-weekly.md"),
-    "utf-8",
-  );
-
-  const prompt = promptTemplate
-    .replace("{DATA_DIR}", config.dataDir)
-    .replace("{USER_EMAIL}", config.email.userEmail);
+async function triggerLoop3(config: InloopConfig): Promise<void> {
+  const prompt = promptLoop3
+    .replaceAll("{DATA_DIR}", config.dataDir)
+    .replaceAll("{USER_EMAIL}", config.email.userEmail);
 
   try {
-    execSync(`claude -p ${shellEscape(prompt)} --allowedTools "Bash(tsx:*)"`, {
-      cwd: PROJECT_ROOT,
-      stdio: "inherit",
-      timeout: 600_000, // 10 min
-    });
+    await runAgent(prompt, 600_000);
   } catch (err) {
     console.error("Loop 3 error:", err);
   }
-}
-
-function shellEscape(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
 main().catch((err) => {

@@ -1,4 +1,4 @@
-import { readFile, access, mkdir } from "fs/promises";
+import { readFile, writeFile, access, mkdir } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
 
@@ -63,7 +63,6 @@ export async function loadConfig(): Promise<InloopConfig> {
 }
 
 export async function saveConfig(config: InloopConfig): Promise<void> {
-  const { writeFile } = await import("fs/promises");
   await mkdir(CONFIG_DIR, { recursive: true });
   await writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), "utf-8");
 }

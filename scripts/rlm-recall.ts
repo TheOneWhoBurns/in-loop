@@ -3,34 +3,19 @@
  * Query RLM for relevant context.
  * Usage: tsx scripts/rlm-recall.ts <data_dir> [--query <text>] [--type <type>] [--topic <id>] [--since <date>] [--limit <n>]
  */
-import { initDB } from "../src/db.js";
-import { rlmRecall } from "../src/rlm.js";
-import type { RLMQuery } from "../src/rlm.js";
+import { getDB, parseFlags } from "../src/script-helpers.js";
+import { rlmRecall, type RLMQuery } from "../src/rlm.js";
 
-const args = process.argv.slice(2);
-const dataDir = args[0];
+const { db } = getDB();
+const flags = parseFlags(process.argv.slice(3));
 
-if (!dataDir) {
-  console.error("Usage: rlm-recall.ts <data_dir> [--query <text>] [--type <type>] [--topic <id>] [--since <date>] [--limit <n>]");
-  process.exit(1);
-}
-
-const db = initDB(dataDir);
 const q: RLMQuery = {};
-
-for (let i = 1; i < args.length; i += 2) {
-  switch (args[i]) {
-    case "--query": q.query = args[i + 1]; break;
-    case "--type":
-      q.types = q.types || [];
-      q.types.push(args[i + 1]);
-      break;
-    case "--topic": q.topicId = parseInt(args[i + 1]); break;
-    case "--since": q.since = args[i + 1]; break;
-    case "--until": q.until = args[i + 1]; break;
-    case "--limit": q.limit = parseInt(args[i + 1]); break;
-  }
-}
+if (flags.query && flags.query !== true) q.query = flags.query;
+if (flags.type && flags.type !== true) q.types = [flags.type];
+if (flags.topic && flags.topic !== true) q.topicId = parseInt(flags.topic);
+if (flags.since && flags.since !== true) q.since = flags.since;
+if (flags.until && flags.until !== true) q.until = flags.until;
+if (flags.limit && flags.limit !== true) q.limit = parseInt(flags.limit);
 
 const results = rlmRecall(db, q);
 

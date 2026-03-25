@@ -7,6 +7,10 @@
  * - Optional cross-topic callouts
  */
 
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 export interface NewsletterArticle {
   title: string;
   url: string; // Already wrapped for click tracking if enabled
@@ -32,10 +36,10 @@ export function composeNewsletter(data: NewsletterData): string {
     <tr>
       <td style="padding: 24px 0; border-bottom: 1px solid #e0e0e0;">
         <h2 style="margin: 0 0 8px 0; color: #1a1a1a; font-size: 20px;">
-          ${section.topicName}
+          ${esc(section.topicName)}
         </h2>
         <p style="margin: 0 0 16px 0; color: #666; font-style: italic; font-size: 14px;">
-          ${section.vibeText}
+          ${esc(section.vibeText)}
         </p>
         <table cellpadding="0" cellspacing="0" border="0" width="100%">
           ${section.articles
@@ -43,10 +47,10 @@ export function composeNewsletter(data: NewsletterData): string {
               (article) => `
             <tr>
               <td style="padding: 8px 0;">
-                <a href="${article.url}" style="color: #0066cc; text-decoration: none; font-size: 16px;">
-                  ${article.title}
+                <a href="${esc(article.url)}" style="color: #0066cc; text-decoration: none; font-size: 16px;">
+                  ${esc(article.title)}
                 </a>
-                ${article.summary ? `<p style="margin: 4px 0 0 0; color: #888; font-size: 13px;">${article.summary}</p>` : ""}
+                ${article.summary ? `<p style="margin: 4px 0 0 0; color: #888; font-size: 13px;">${esc(article.summary)}</p>` : ""}
               </td>
             </tr>
           `,
@@ -65,7 +69,7 @@ export function composeNewsletter(data: NewsletterData): string {
     <tr>
       <td style="padding: 24px 0; border-bottom: 1px solid #e0e0e0;">
         <h2 style="margin: 0 0 12px 0; color: #1a1a1a; font-size: 18px;">🔗 Cross-topic</h2>
-        ${data.crossTopicNotes.map((note) => `<p style="margin: 4px 0; color: #555; font-size: 14px;">${note}</p>`).join("")}
+        ${data.crossTopicNotes.map((note) => `<p style="margin: 4px 0; color: #555; font-size: 14px;">${esc(note)}</p>`).join("")}
       </td>
     </tr>
   `

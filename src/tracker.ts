@@ -8,8 +8,8 @@
  */
 
 import { createServer, type Server } from "http";
-import type { TrackingConfig } from "../config.js";
-import type { DB } from "../db/index.js";
+import type { TrackingConfig } from "./config.js";
+import type { DB } from "./db.js";
 
 export class ClickTracker {
   private server: Server | null = null;

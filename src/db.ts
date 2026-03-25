@@ -64,14 +64,6 @@ function createTables(db: DB): void {
       full_html TEXT DEFAULT ''
     );
 
-    CREATE TABLE IF NOT EXISTS think_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      loop_type TEXT NOT NULL,
-      topic_id INTEGER REFERENCES topics(id),
-      content TEXT NOT NULL,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
     CREATE TABLE IF NOT EXISTS influence_notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
@@ -90,7 +82,6 @@ function createTables(db: DB): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_candidates_topic_date ON candidates(topic_id, found_date);
-    CREATE INDEX IF NOT EXISTS idx_think_logs_loop ON think_logs(loop_type, created_at);
     CREATE INDEX IF NOT EXISTS idx_sources_topic ON sources(topic_id);
     CREATE INDEX IF NOT EXISTS idx_rlm_type ON rlm_entries(type);
     CREATE INDEX IF NOT EXISTS idx_rlm_topic ON rlm_entries(topic_id);

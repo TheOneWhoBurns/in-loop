@@ -7,6 +7,8 @@
 
 import { createInterface } from "readline";
 import { execSync } from "child_process";
+import { join } from "path";
+import { homedir } from "os";
 import { saveConfig, type InloopConfig } from "../src/config.js";
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -122,7 +124,7 @@ async function main() {
 
   // Save config
   const config: InloopConfig = {
-    dataDir: "",
+    dataDir: join(homedir(), ".config", "inloop", "data"),
     email: {
       imap: { host: imapHost, port: parseInt(imapPort), secure: true, auth: { user: emailUser, pass: emailPass } },
       smtp: { host: smtpHost, port: parseInt(smtpPort), secure: true, auth: { user: emailUser, pass: emailPass } },

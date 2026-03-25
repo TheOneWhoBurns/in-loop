@@ -71,6 +71,8 @@ export function rlmRecall(db: DB, q: RLMQuery): RLMResult[] {
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limit = q.limit || 20;
+  // Fetch a larger window so keyword scoring can find relevant older entries
+  const fetchLimit = q.query ? limit * 5 : limit;
 
   const entries = db
     .prepare(
@@ -78,7 +80,7 @@ export function rlmRecall(db: DB, q: RLMQuery): RLMResult[] {
        FROM rlm_entries ${where}
        ORDER BY created_at DESC LIMIT ?`,
     )
-    .all(...params, limit) as Array<{
+    .all(...params, fetchLimit) as Array<{
     id: number;
     type: string;
     topicId: number | null;
@@ -110,5 +112,6 @@ export function rlmRecall(db: DB, q: RLMQuery): RLMResult[] {
         score: Math.min(1, score),
       };
     })
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
 }
