@@ -134,11 +134,16 @@ async function inlinePoll(emailConfig: EmailConfig): Promise<ParsedEmail[]> {
     console.log("  IMAP: locked. Fetching...");
 
     try {
+      // Collect all messages first — ImapFlow docs warn:
+      // "You cannot run any IMAP commands in the fetch loop"
+      const messages: Array<{ seq: number; source: Buffer }> = [];
       for await (const msg of imap.fetch({ seen: false }, { source: true })) {
-        console.log("  IMAP: got message seq:", msg.seq, "source bytes:", msg.source?.length);
-        console.log("  IMAP: parsing...");
+        messages.push({ seq: msg.seq, source: msg.source });
+      }
+
+      // Now parse and mark as seen outside the fetch loop
+      for (const msg of messages) {
         const parsed = await simpleParser(msg.source);
-        console.log("  IMAP: parsed, from:", parsed.from?.value?.[0]?.address);
         emails.push({
           from: parsed.from?.value?.[0]?.address || "unknown",
           subject: parsed.subject || "(no subject)",
@@ -147,9 +152,12 @@ async function inlinePoll(emailConfig: EmailConfig): Promise<ParsedEmail[]> {
           date: (parsed.date || new Date()).toISOString(),
           messageId: parsed.messageId,
         });
-        console.log("  IMAP: marking as seen...");
-        await imap.messageFlagsAdd(msg.seq, ["\\Seen"], { uid: false });
-        console.log("  IMAP: done with message", msg.seq);
+      }
+
+      // Mark all as seen in one go
+      if (messages.length > 0) {
+        const seqRange = messages.map((m) => m.seq).join(",");
+        await imap.messageFlagsAdd(seqRange, ["\\Seen"], { uid: false });
       }
     } finally {
       lock.release();

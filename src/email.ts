@@ -43,12 +43,14 @@ export async function pollForNewEmails(config: EmailConfig): Promise<ParsedEmail
     const lock = await imap.getMailboxLock("INBOX");
 
     try {
-      // Manually iterate with .next() to avoid Node.js ESM async
-      // iterator bug where for-await hangs across module boundaries
-      const iter = imap.fetch({ seen: false }, { source: true });
-      while (true) {
-        const { value: msg, done } = await iter.next();
-        if (done || !msg) break;
+      // Collect all messages first — ImapFlow docs warn:
+      // "You cannot run any IMAP commands in the fetch loop"
+      const messages: Array<{ seq: number; source: Buffer }> = [];
+      for await (const msg of imap.fetch({ seen: false }, { source: true })) {
+        messages.push({ seq: msg.seq, source: msg.source });
+      }
+
+      for (const msg of messages) {
         const parsed = await simpleParser(msg.source);
         emails.push({
           from: parsed.from?.value?.[0]?.address || "unknown",
@@ -58,7 +60,11 @@ export async function pollForNewEmails(config: EmailConfig): Promise<ParsedEmail
           date: (parsed.date || new Date()).toISOString(),
           messageId: parsed.messageId,
         });
-        await imap.messageFlagsAdd(msg.seq, ["\\Seen"], { uid: false });
+      }
+
+      if (messages.length > 0) {
+        const seqRange = messages.map((m) => m.seq).join(",");
+        await imap.messageFlagsAdd(seqRange, ["\\Seen"], { uid: false });
       }
     } finally {
       lock.release();
