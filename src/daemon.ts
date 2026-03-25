@@ -5,13 +5,12 @@ import { readFile } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import cron from "node-cron";
-import { loadConfig, isFirstRun, type InloopConfig } from "./config.js";
-import { pollForNewEmails } from "./email.js";
-// Lazy-import db.js — better-sqlite3's native addon conflicts with ImapFlow
-// when both are loaded via tsx's ESM transform at module init time
-let initDB: typeof import("./db.js").initDB;
-let ClickTracker: typeof import("./tracker.js").ClickTracker;
-type DB = import("./db.js").DB;
+import { ImapFlow } from "imapflow";
+import { simpleParser } from "mailparser";
+import { createTransport } from "nodemailer";
+import { loadConfig, isFirstRun, type InloopConfig, type EmailConfig } from "./config.js";
+import { initDB, type DB } from "./db.js";
+import { ClickTracker } from "./tracker.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, "..");
@@ -48,16 +47,10 @@ async function main() {
     process.exit(1);
   }
 
-  // Dynamic imports to avoid tsx ESM + better-sqlite3 native addon conflict
-  const dbMod = await import("./db.js");
-  initDB = dbMod.initDB;
-  const trackerMod = await import("./tracker.js");
-  ClickTracker = trackerMod.ClickTracker;
-
   const config = await loadConfig();
-  const db = initDB(config.dataDir);
   initAgentCLI(config);
   await loadPrompts();
+  const db = initDB(config.dataDir);
 
   if (config.tracking?.enabled) {
     const tracker = new ClickTracker(config.tracking, db);
@@ -70,7 +63,10 @@ async function main() {
     polling = true;
     try {
       console.log("📫 Polling for new emails...");
-      const newEmails = await pollForNewEmails(config.email);
+      // Inline IMAP logic — importing pollForNewEmails from a separate
+      // ESM module causes imap.connect() to hang (Node.js ESM bug with
+      // async generators/streams crossing module boundaries)
+      const newEmails = await inlinePoll(config.email);
       console.log(`   Found ${newEmails.length} unread email(s)`);
       for (const email of newEmails) {
         await triggerLoop1(email, config);
@@ -104,6 +100,57 @@ async function main() {
     db.close();
     process.exit(0);
   });
+}
+
+interface ParsedEmail {
+  from: string;
+  subject: string;
+  text: string;
+  html?: string;
+  date: string;
+  messageId?: string;
+}
+
+async function inlinePoll(emailConfig: EmailConfig): Promise<ParsedEmail[]> {
+  const imap = new ImapFlow({
+    host: emailConfig.imap.host,
+    port: emailConfig.imap.port,
+    secure: emailConfig.imap.secure,
+    auth: emailConfig.imap.auth,
+    logger: false,
+    disableCompression: true,
+  });
+
+  const emails: ParsedEmail[] = [];
+  imap.on("error", (err: Error) => {
+    console.error("IMAP connection error:", err.message);
+  });
+
+  try {
+    await imap.connect();
+    const lock = await imap.getMailboxLock("INBOX");
+
+    try {
+      for await (const msg of imap.fetch({ seen: false }, { source: true })) {
+        const parsed = await simpleParser(msg.source);
+        emails.push({
+          from: parsed.from?.value?.[0]?.address || "unknown",
+          subject: parsed.subject || "(no subject)",
+          text: parsed.text || "",
+          html: parsed.html || undefined,
+          date: (parsed.date || new Date()).toISOString(),
+          messageId: parsed.messageId,
+        });
+        await imap.messageFlagsAdd(msg.seq, ["\\Seen"], { uid: false });
+      }
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await imap.logout().catch(() => {});
+  }
+
+  return emails;
 }
 
 let agentCLI = DEFAULT_AGENT_CLI;
