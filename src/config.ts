@@ -55,11 +55,28 @@ export async function loadConfig(): Promise<InloopConfig> {
   const raw = await readFile(CONFIG_FILE, "utf-8");
   const config = JSON.parse(raw) as InloopConfig;
 
-  // Ensure data dir exists
   config.dataDir = config.dataDir || join(CONFIG_DIR, "data");
   await mkdir(config.dataDir, { recursive: true });
 
+  // Resolve env var references in auth passwords (e.g. "${INLOOP_APP_PASSWORD}")
+  resolveEnvVars(config);
+
   return config;
+}
+
+function resolveEnvVars(config: InloopConfig): void {
+  const resolve = (val: string): string => {
+    const match = val.match(/^\$\{(\w+)\}$/);
+    if (match) {
+      const envVal = process.env[match[1]];
+      if (!envVal) throw new Error(`Environment variable ${match[1]} is not set`);
+      return envVal;
+    }
+    return val;
+  };
+
+  config.email.imap.auth.pass = resolve(config.email.imap.auth.pass);
+  config.email.smtp.auth.pass = resolve(config.email.smtp.auth.pass);
 }
 
 export async function saveConfig(config: InloopConfig): Promise<void> {
