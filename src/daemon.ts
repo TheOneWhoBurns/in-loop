@@ -127,7 +127,9 @@ async function inlinePoll(emailConfig: EmailConfig): Promise<ParsedEmail[]> {
   });
 
   try {
+    console.log("  IMAP: connecting...");
     await imap.connect();
+    console.log("  IMAP: connected!");
     const lock = await imap.getMailboxLock("INBOX");
 
     try {
