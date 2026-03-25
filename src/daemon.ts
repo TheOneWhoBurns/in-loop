@@ -129,11 +129,13 @@ async function inlinePoll(emailConfig: EmailConfig): Promise<ParsedEmail[]> {
   try {
     console.log("  IMAP: connecting...");
     await imap.connect();
-    console.log("  IMAP: connected!");
+    console.log("  IMAP: connected! Getting lock...");
     const lock = await imap.getMailboxLock("INBOX");
+    console.log("  IMAP: locked. Fetching...");
 
     try {
       for await (const msg of imap.fetch({ seen: false }, { source: true })) {
+        console.log("  IMAP: got message seq:", msg.seq);
         const parsed = await simpleParser(msg.source);
         emails.push({
           from: parsed.from?.value?.[0]?.address || "unknown",
