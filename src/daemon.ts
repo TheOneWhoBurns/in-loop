@@ -135,8 +135,10 @@ async function inlinePoll(emailConfig: EmailConfig): Promise<ParsedEmail[]> {
 
     try {
       for await (const msg of imap.fetch({ seen: false }, { source: true })) {
-        console.log("  IMAP: got message seq:", msg.seq);
+        console.log("  IMAP: got message seq:", msg.seq, "source bytes:", msg.source?.length);
+        console.log("  IMAP: parsing...");
         const parsed = await simpleParser(msg.source);
+        console.log("  IMAP: parsed, from:", parsed.from?.value?.[0]?.address);
         emails.push({
           from: parsed.from?.value?.[0]?.address || "unknown",
           subject: parsed.subject || "(no subject)",
@@ -145,7 +147,9 @@ async function inlinePoll(emailConfig: EmailConfig): Promise<ParsedEmail[]> {
           date: (parsed.date || new Date()).toISOString(),
           messageId: parsed.messageId,
         });
+        console.log("  IMAP: marking as seen...");
         await imap.messageFlagsAdd(msg.seq, ["\\Seen"], { uid: false });
+        console.log("  IMAP: done with message", msg.seq);
       }
     } finally {
       lock.release();
