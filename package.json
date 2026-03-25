@@ -8,9 +8,9 @@
     "inloop": "dist/daemon.js"
   },
   "scripts": {
-    "dev": "tsx src/daemon.ts",
+    "start": "tsx src/daemon.ts",
     "build": "tsc",
-    "start": "node dist/daemon.js",
+    "start:built": "node dist/daemon.js",
     "install-wizard": "tsx install/wizard.ts"
   },
   "keywords": ["newsletter", "agent", "llm", "byok", "email", "ai", "claude-code"],

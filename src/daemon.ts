@@ -16,6 +16,13 @@ const PROJECT_ROOT = join(__dirname, "..");
 const ALLOWED_TOOLS = "Bash(tsx:*)";
 const MAX_CONCURRENT_TOPICS = 3;
 
+/** Default to Claude Code if no agentCLI configured */
+const DEFAULT_AGENT_CLI = {
+  command: "claude",
+  promptArgs: ["-p"],
+  toolsArgs: ["--allowedTools"],
+};
+
 // Prompt templates — loaded once at startup
 let promptLoop1 = "";
 let promptLoop2 = "";
@@ -34,13 +41,13 @@ async function main() {
 
   if (await isFirstRun()) {
     console.error("No config found. Run the setup first:");
-    console.error("  npx inloop install   (CLI wizard)");
-    console.error("  or use /install-inloop in Claude Code");
+    console.error("  tsx install/wizard.ts");
     process.exit(1);
   }
 
   const config = await loadConfig();
   const db = initDB(config.dataDir);
+  initAgentCLI(config);
   await loadPrompts();
 
   if (config.tracking?.enabled) {
@@ -88,11 +95,25 @@ async function main() {
   });
 }
 
+let agentCLI = DEFAULT_AGENT_CLI;
+
+function initAgentCLI(config: InloopConfig): void {
+  if (config.agentCLI) {
+    agentCLI = config.agentCLI;
+  }
+}
+
 function runAgent(prompt: string, timeoutMs: number): Promise<void> {
+  const args = [
+    ...agentCLI.promptArgs,
+    prompt,
+    ...(agentCLI.toolsArgs.length > 0 ? [...agentCLI.toolsArgs, ALLOWED_TOOLS] : []),
+  ];
+
   return new Promise((resolve, reject) => {
     const child = execFile(
-      "claude",
-      ["-p", prompt, "--allowedTools", ALLOWED_TOOLS],
+      agentCLI.command,
+      args,
       { cwd: PROJECT_ROOT, timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 },
       (err) => {
         if (err) reject(err);

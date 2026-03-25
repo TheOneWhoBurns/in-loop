@@ -26,10 +26,21 @@ export interface TrackingConfig {
   publicUrl?: string;
 }
 
+export interface AgentCLIConfig {
+  /** Binary name (e.g. "claude", "codex") */
+  command: string;
+  /** Args to pass a one-shot prompt (e.g. ["-p"] for claude, ["exec"] for codex) */
+  promptArgs: string[];
+  /** Args to restrict allowed tools (e.g. ["--allowedTools"] for claude) */
+  toolsArgs: string[];
+}
+
 export interface InloopConfig {
   dataDir: string;
   email: EmailConfig;
   tracking?: TrackingConfig;
+  /** Which agent CLI to use. Auto-detected by wizard. */
+  agentCLI?: AgentCLIConfig;
   /** Cron expressions */
   schedule: {
     dailyResearch: string; // e.g. "0 6 * * *" (6am daily)
