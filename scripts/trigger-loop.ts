@@ -10,17 +10,11 @@
  * Loop 3: Weekly newsletter (curates and sends)
  */
 
-import { execFile } from "child_process";
-import { readFile } from "fs/promises";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import { loadConfig } from "../src/config.js";
 import { initDB } from "../src/db.js";
 import { pollForNewEmails } from "../src/email.js";
 import { parseFlags } from "../src/script-helpers.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = join(__dirname, "..");
+import { runAgent, loadPrompt, DEFAULT_AGENT_CLI } from "../src/agent.js";
 
 const flags = parseFlags(process.argv.slice(2));
 const loop = flags.loop;
@@ -32,39 +26,7 @@ if (!loop || loop === true || !["1", "2", "3"].includes(loop)) {
 
 const config = await loadConfig();
 const db = initDB(config.dataDir);
-
-const agentCLI = config.agentCLI ?? {
-  command: "claude",
-  promptArgs: ["-p"],
-  toolsArgs: ["--allowedTools"],
-};
-const ALLOWED_TOOLS = "Bash(tsx:*)";
-
-function runAgent(prompt: string, timeoutMs: number): Promise<void> {
-  const args = [
-    ...agentCLI.promptArgs,
-    prompt,
-    ...(agentCLI.toolsArgs.length > 0 ? [...agentCLI.toolsArgs, ALLOWED_TOOLS] : []),
-  ];
-
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      agentCLI.command,
-      args,
-      { cwd: PROJECT_ROOT, timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 },
-      (err) => {
-        if (err) reject(err);
-        else resolve();
-      },
-    );
-    child.stdout?.pipe(process.stdout);
-    child.stderr?.pipe(process.stderr);
-  });
-}
-
-async function loadPrompt(name: string): Promise<string> {
-  return readFile(join(PROJECT_ROOT, `prompts/${name}`), "utf-8");
-}
+const agentCLI = config.agentCLI ?? DEFAULT_AGENT_CLI;
 
 if (loop === "1") {
   console.log("🔄 Triggering Loop 1: Email processing...");
@@ -81,7 +43,7 @@ if (loop === "1") {
         .replace("{EMAIL_BODY}", email.text)
         .replace("{EMAIL_DATE}", email.date)
         .replaceAll("{DATA_DIR}", config.dataDir);
-      await runAgent(prompt, 120_000);
+      await runAgent(agentCLI, prompt, 120_000);
     }
   }
 } else if (loop === "2") {
@@ -102,7 +64,7 @@ if (loop === "1") {
         .replaceAll("{TOPIC_ID}", String(topic.id))
         .replaceAll("{TOPIC_NAME}", topic.name)
         .replaceAll("{DATA_DIR}", config.dataDir);
-      await runAgent(prompt, 300_000);
+      await runAgent(agentCLI, prompt, 300_000);
     }
   }
 } else if (loop === "3") {
@@ -111,7 +73,7 @@ if (loop === "1") {
   const prompt = template
     .replaceAll("{DATA_DIR}", config.dataDir)
     .replaceAll("{USER_EMAIL}", config.email.userEmail);
-  await runAgent(prompt, 600_000);
+  await runAgent(agentCLI, prompt, 600_000);
 }
 
 db.close();

@@ -1,40 +1,24 @@
 #!/usr/bin/env node
 
-import { execFile } from "child_process";
-import { readFile } from "fs/promises";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import cron from "node-cron";
-import { ImapFlow } from "imapflow";
-import { simpleParser } from "mailparser";
-import { createTransport } from "nodemailer";
-import { loadConfig, isFirstRun, type InloopConfig, type EmailConfig } from "./config.js";
+import { loadConfig, isFirstRun, type InloopConfig } from "./config.js";
 import { initDB, type DB } from "./db.js";
 import { ClickTracker } from "./tracker.js";
+import { runAgent, loadPrompt, DEFAULT_AGENT_CLI } from "./agent.js";
+import { fetchNewEmails, startPolling, type AgentMailConfig } from "./agentmail.js";
+import type { AgentCLIConfig } from "./config.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = join(__dirname, "..");
-
-const ALLOWED_TOOLS = "Bash(tsx:*)";
 const MAX_CONCURRENT_TOPICS = 3;
 
-/** Default to Claude Code if no agentCLI configured */
-const DEFAULT_AGENT_CLI = {
-  command: "claude",
-  promptArgs: ["-p"],
-  toolsArgs: ["--allowedTools"],
-};
-
-// Prompt templates — loaded once at startup
 let promptLoop1 = "";
 let promptLoop2 = "";
 let promptLoop3 = "";
 
 async function loadPrompts(): Promise<void> {
   [promptLoop1, promptLoop2, promptLoop3] = await Promise.all([
-    readFile(join(PROJECT_ROOT, "prompts/loop1-email.md"), "utf-8"),
-    readFile(join(PROJECT_ROOT, "prompts/loop2-daily.md"), "utf-8"),
-    readFile(join(PROJECT_ROOT, "prompts/loop3-weekly.md"), "utf-8"),
+    loadPrompt("loop1-email.md"),
+    loadPrompt("loop2-daily.md"),
+    loadPrompt("loop3-weekly.md"),
   ]);
 }
 
@@ -48,160 +32,77 @@ async function main() {
   }
 
   const config = await loadConfig();
-  initAgentCLI(config);
+  const agentCLI: AgentCLIConfig = config.agentCLI ?? DEFAULT_AGENT_CLI;
   await loadPrompts();
   const db = initDB(config.dataDir);
 
+  let tracker: ClickTracker | null = null;
   if (config.tracking?.enabled) {
-    const tracker = new ClickTracker(config.tracking, db);
+    tracker = new ClickTracker(config.tracking, db);
     await tracker.start();
   }
 
-  let polling = false;
-  const emailPoll = async () => {
-    if (polling) return;
-    polling = true;
+  // Build AgentMail config from email config
+  const mailConfig: AgentMailConfig = {
+    apiKey: config.email.imap.auth.pass, // API key stored as IMAP password
+    inboxId: config.email.imap.auth.user, // inbox address stored as IMAP user
+  };
+
+  // Process any emails that arrived while we were offline
+  let processing = false;
+  const processNewEmails = async () => {
+    if (processing) return;
+    processing = true;
     try {
-      console.log("📫 Polling for new emails...");
-      // Inline IMAP logic — importing pollForNewEmails from a separate
-      // ESM module causes imap.connect() to hang (Node.js ESM bug with
-      // async generators/streams crossing module boundaries)
-      const newEmails = await inlinePoll(config.email);
-      console.log(`   Found ${newEmails.length} unread email(s)`);
-      for (const email of newEmails) {
-        await triggerLoop1(email, config);
+      const emails = await fetchNewEmails(mailConfig);
+      if (emails.length > 0) {
+        console.log(`📫 ${emails.length} new email(s) received`);
+        for (const email of emails) {
+          await triggerLoop1(email, config, agentCLI);
+        }
       }
     } catch (err) {
-      console.error("Email poll error:", err);
+      console.error("Email processing error:", err);
     } finally {
-      polling = false;
+      processing = false;
     }
   };
 
-  setInterval(emailPoll, (config.pollInterval || 30) * 1000);
-  await emailPoll();
+  await processNewEmails();
+
+  // Poll for new emails every 60s via lightweight API check
+  const poller = startPolling(mailConfig, () => {
+    processNewEmails();
+  });
 
   cron.schedule(config.schedule.dailyResearch, async () => {
     console.log("⏰ Daily research triggered");
-    await triggerLoop2(config, db);
+    await triggerLoop2(config, db, agentCLI);
   });
 
   cron.schedule(config.schedule.weeklyNewsletter, async () => {
     console.log("⏰ Weekly newsletter triggered");
-    await triggerLoop3(config);
+    await triggerLoop3(config, agentCLI);
   });
 
-  console.log("✅ inloop is running. Waiting for emails...");
+  console.log("✅ inloop is running. Checking for emails every 60s...");
+  console.log(`   Inbox: ${mailConfig.inboxId}`);
   console.log(`   Daily research: ${config.schedule.dailyResearch}`);
   console.log(`   Weekly newsletter: ${config.schedule.weeklyNewsletter}`);
 
-  process.on("SIGINT", () => {
+  process.on("SIGINT", async () => {
     console.log("\n🛑 Shutting down...");
+    poller.close();
+    if (tracker) await tracker.stop();
     db.close();
     process.exit(0);
-  });
-}
-
-interface ParsedEmail {
-  from: string;
-  subject: string;
-  text: string;
-  html?: string;
-  date: string;
-  messageId?: string;
-}
-
-async function inlinePoll(emailConfig: EmailConfig): Promise<ParsedEmail[]> {
-  const imap = new ImapFlow({
-    host: emailConfig.imap.host,
-    port: emailConfig.imap.port,
-    secure: emailConfig.imap.secure,
-    auth: emailConfig.imap.auth,
-    logger: false,
-    disableCompression: true,
-  });
-
-  const emails: ParsedEmail[] = [];
-  imap.on("error", (err: Error) => {
-    console.error("IMAP connection error:", err.message);
-  });
-
-  try {
-    console.log("  IMAP: connecting...");
-    await imap.connect();
-    console.log("  IMAP: connected! Getting lock...");
-    const lock = await imap.getMailboxLock("INBOX");
-    console.log("  IMAP: locked. Fetching...");
-
-    try {
-      // Collect all messages first — ImapFlow docs warn:
-      // "You cannot run any IMAP commands in the fetch loop"
-      const messages: Array<{ seq: number; source: Buffer }> = [];
-      for await (const msg of imap.fetch({ seen: false }, { source: true })) {
-        messages.push({ seq: msg.seq, source: msg.source });
-      }
-
-      // Now parse and mark as seen outside the fetch loop
-      for (const msg of messages) {
-        const parsed = await simpleParser(msg.source);
-        emails.push({
-          from: parsed.from?.value?.[0]?.address || "unknown",
-          subject: parsed.subject || "(no subject)",
-          text: parsed.text || "",
-          html: parsed.html || undefined,
-          date: (parsed.date || new Date()).toISOString(),
-          messageId: parsed.messageId,
-        });
-      }
-
-      // Mark all as seen in one go
-      if (messages.length > 0) {
-        const seqRange = messages.map((m) => m.seq).join(",");
-        await imap.messageFlagsAdd(seqRange, ["\\Seen"], { uid: false });
-      }
-    } finally {
-      lock.release();
-    }
-  } finally {
-    await imap.logout().catch(() => {});
-  }
-
-  return emails;
-}
-
-let agentCLI = DEFAULT_AGENT_CLI;
-
-function initAgentCLI(config: InloopConfig): void {
-  if (config.agentCLI) {
-    agentCLI = config.agentCLI;
-  }
-}
-
-function runAgent(prompt: string, timeoutMs: number): Promise<void> {
-  const args = [
-    ...agentCLI.promptArgs,
-    prompt,
-    ...(agentCLI.toolsArgs.length > 0 ? [...agentCLI.toolsArgs, ALLOWED_TOOLS] : []),
-  ];
-
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      agentCLI.command,
-      args,
-      { cwd: PROJECT_ROOT, timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 },
-      (err) => {
-        if (err) reject(err);
-        else resolve();
-      },
-    );
-    child.stdout?.pipe(process.stdout);
-    child.stderr?.pipe(process.stderr);
   });
 }
 
 async function triggerLoop1(
   email: { from: string; subject: string; text: string; date: string },
   config: InloopConfig,
+  agentCLI: AgentCLIConfig,
 ): Promise<void> {
   console.log(`📧 Processing email from ${email.from}: ${email.subject}`);
 
@@ -213,13 +114,13 @@ async function triggerLoop1(
     .replaceAll("{DATA_DIR}", config.dataDir);
 
   try {
-    await runAgent(prompt, 120_000);
+    await runAgent(agentCLI, prompt, 120_000);
   } catch (err) {
     console.error("Loop 1 agent error:", err);
   }
 }
 
-async function triggerLoop2(config: InloopConfig, db: DB): Promise<void> {
+async function triggerLoop2(config: InloopConfig, db: DB, agentCLI: AgentCLIConfig): Promise<void> {
   const topics = db
     .prepare("SELECT id, name FROM topics")
     .all() as Array<{ id: number; name: string }>;
@@ -229,7 +130,6 @@ async function triggerLoop2(config: InloopConfig, db: DB): Promise<void> {
     return;
   }
 
-  // Run topics in parallel with bounded concurrency
   const chunks: Array<typeof topics> = [];
   for (let i = 0; i < topics.length; i += MAX_CONCURRENT_TOPICS) {
     chunks.push(topics.slice(i, i + MAX_CONCURRENT_TOPICS));
@@ -245,7 +145,7 @@ async function triggerLoop2(config: InloopConfig, db: DB): Promise<void> {
           .replaceAll("{DATA_DIR}", config.dataDir);
 
         try {
-          await runAgent(prompt, 300_000);
+          await runAgent(agentCLI, prompt, 300_000);
         } catch (err) {
           console.error(`Loop 2 error for "${topic.name}":`, err);
         }
@@ -254,13 +154,13 @@ async function triggerLoop2(config: InloopConfig, db: DB): Promise<void> {
   }
 }
 
-async function triggerLoop3(config: InloopConfig): Promise<void> {
+async function triggerLoop3(config: InloopConfig, agentCLI: AgentCLIConfig): Promise<void> {
   const prompt = promptLoop3
     .replaceAll("{DATA_DIR}", config.dataDir)
     .replaceAll("{USER_EMAIL}", config.email.userEmail);
 
   try {
-    await runAgent(prompt, 600_000);
+    await runAgent(agentCLI, prompt, 600_000);
   } catch (err) {
     console.error("Loop 3 error:", err);
   }

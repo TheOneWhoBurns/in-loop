@@ -7,9 +7,7 @@
  * - Optional cross-topic callouts
  */
 
-function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
+import { escapeHtml as esc } from "./script-helpers.js";
 
 export interface NewsletterArticle {
   title: string;

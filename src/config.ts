@@ -46,8 +46,8 @@ export interface InloopConfig {
     dailyResearch: string; // e.g. "0 6 * * *" (6am daily)
     weeklyNewsletter: string; // e.g. "0 18 * * 0" (6pm Sunday)
   };
-  /** IMAP poll interval in seconds */
-  pollInterval: number;
+  /** @deprecated — daemon now uses IMAP IDLE instead of polling */
+  pollInterval?: number;
 }
 
 const CONFIG_DIR = join(homedir(), ".config", "inloop");

@@ -106,12 +106,9 @@ export function rlmRecall(db: DB, q: RLMQuery): RLMResult[] {
         (Date.now() - new Date(entry.createdAt).getTime()) / 3_600_000;
       score += Math.max(0, 0.1 * (1 - ageHours / 168)); // 168h = 1 week
 
-      return {
-        ...entry,
-        metadata: JSON.parse(entry.metadata),
-        score: Math.min(1, score),
-      };
+      return { ...entry, score: Math.min(1, score) };
     })
     .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+    .slice(0, limit)
+    .map((entry) => ({ ...entry, metadata: JSON.parse(entry.metadata) }));
 }
