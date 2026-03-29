@@ -41,13 +41,13 @@ export interface InloopConfig {
   tracking?: TrackingConfig;
   /** Which agent CLI to use. Auto-detected by wizard. */
   agentCLI?: AgentCLIConfig;
-  /** Cron expressions */
+  /** Cron expressions (interpreted in the configured timezone) */
   schedule: {
     dailyResearch: string; // e.g. "0 6 * * *" (6am daily)
-    weeklyNewsletter: string; // e.g. "0 18 * * 0" (6pm Sunday)
+    weeklyNewsletter: string; // e.g. "0 16 * * 5" (4pm Friday)
   };
-  /** @deprecated — daemon now uses IMAP IDLE instead of polling */
-  pollInterval?: number;
+  /** IANA timezone for schedule (e.g. "Pacific/Galapagos", "America/New_York") */
+  timezone?: string;
 }
 
 const CONFIG_DIR = join(homedir(), ".config", "inloop");

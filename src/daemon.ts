@@ -75,20 +75,24 @@ async function main() {
     processNewEmails();
   });
 
+  const cronOpts = config.timezone ? { timezone: config.timezone } : {};
+
   cron.schedule(config.schedule.dailyResearch, async () => {
     console.log("⏰ Daily research triggered");
     await triggerLoop2(config, db, agentCLI);
-  });
+  }, cronOpts);
 
   cron.schedule(config.schedule.weeklyNewsletter, async () => {
     console.log("⏰ Weekly newsletter triggered");
     await triggerLoop3(config, agentCLI);
-  });
+  }, cronOpts);
 
+  const tz = config.timezone || "UTC";
   console.log("✅ inloop is running. Checking for emails every 60s...");
   console.log(`   Inbox: ${mailConfig.inboxId}`);
-  console.log(`   Daily research: ${config.schedule.dailyResearch}`);
-  console.log(`   Weekly newsletter: ${config.schedule.weeklyNewsletter}`);
+  console.log(`   Timezone: ${tz}`);
+  console.log(`   Daily research: ${config.schedule.dailyResearch} (${tz})`);
+  console.log(`   Weekly newsletter: ${config.schedule.weeklyNewsletter} (${tz})`);
 
   process.on("SIGINT", async () => {
     console.log("\n🛑 Shutting down...");
